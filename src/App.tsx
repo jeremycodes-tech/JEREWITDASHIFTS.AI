@@ -214,7 +214,8 @@ export default function App() {
           temperature: 0.2,
         });
         replyText = response.choices[0]?.message?.content?.trim() || "";
-      } else if (activeModel === "openai" || activeModel === "groq") {
+      } else if (activeModel === "openai") {
+
         // ✅ OpenAI (with optional Web context)
         let webText = "";
         let webSources: { title?: string; link: string; snippet?: string }[] = [];
