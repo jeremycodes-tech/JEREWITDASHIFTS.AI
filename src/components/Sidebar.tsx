@@ -191,7 +191,9 @@ export default function Sidebar({
                         </button>
 
                         <button
-                          ref={(el) => (buttonRefs.current[c.id] = el)}
+                          ref={(el) => {
+                            buttonRefs.current[c.id] = el;
+                          }}
                           onClick={(e) => {
                             const rect = (
                               e.currentTarget as HTMLElement

@@ -214,7 +214,7 @@ export default function App() {
           temperature: 0.2,
         });
         replyText = response.choices[0]?.message?.content?.trim() || "";
-      } else {
+      } else if (activeModel === "openai" || activeModel === "groq") {
         // ✅ OpenAI (with optional Web context)
         let webText = "";
         let webSources: { title?: string; link: string; snippet?: string }[] = [];
@@ -302,7 +302,7 @@ export default function App() {
         activeConversationId={activeConversationId}
         setActiveConversationId={setActiveConversationId}
         handleNewChat={handleNewChat}
-        handleNewProChat={handleNewProChat} 
+        handleNewProChat={handleNewProChat}
         handleDeleteChat={handleDeleteChat}
         handleRenameChat={handleRenameChat}
         handleDuplicateChat={handleDuplicateChat}
