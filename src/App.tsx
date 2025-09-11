@@ -144,147 +144,129 @@ export default function App() {
     setConversations((prev) => [...prev, newConvo]);
   };
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
+const sendMessage = async () => {
+  if (!input.trim()) return;
 
-    const now = new Date();
-    const newMsg: Message = {
-      role: "user",
-      content: input,
+  const now = new Date();
+
+  const newMsg: Message = {
+    role: "user",
+    content: input,
+    timestamp: getTime(),
+  };
+
+  let convoId = activeConversationId;
+  let activeModel: "openai" | "groq" = "openai";
+
+  if (convoId) {
+    // ✅ find conversation safely
+    const convo = conversations.find((c) => c.id === convoId);
+    if (convo) {
+      activeModel = convo.model; // always defined ("openai" | "groq")
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === convoId ? { ...c, messages: [...c.messages, newMsg] } : c
+        )
+      );
+    }
+  } else {
+    // ✅ new conversation always starts with "openai"
+    const newConvo: Conversation = {
+      id: crypto?.randomUUID?.() || Math.random().toString(36).slice(2),
+      title: summarizeTitle(input),
+      section: getSection(now),
+      messages: [newMsg],
+      model: "openai",
+    };
+    convoId = newConvo.id;
+    activeModel = newConvo.model;
+    setConversations((prev) => [...prev, newConvo]);
+    setActiveConversationId(newConvo.id);
+  }
+
+  setInput("");
+  setIsTyping(true);
+
+  // ✅ Local answer first
+  const local = maybeLocalAnswer(newMsg.content);
+  if (local) {
+    const reply: Message = {
+      role: "assistant",
+      content: local,
       timestamp: getTime(),
     };
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === convoId ? { ...c, messages: [...c.messages, reply] } : c
+      )
+    );
+    setIsTyping(false);
+    return;
+  }
 
-    let convoId = activeConversationId;
-    let activeModel: "openai" | "groq" = "openai";
+  let replyText = "";
 
-    if (convoId) {
-      setConversations((prev) =>
-        prev.map((c) => {
-          if (c.id === convoId) {
-            activeModel = c.model || "openai";
-            return { ...c, messages: [...c.messages, newMsg] };
-          }
-          return c;
-        })
-      );
-    } else {
-      const newConvo: Conversation = {
-        id: crypto?.randomUUID?.() || Math.random().toString(36).slice(2),
-        title: summarizeTitle(input),
-        section: getSection(now),
-        messages: [newMsg],
-        model: "openai",
-      };
-      convoId = newConvo.id;
-      setConversations((prev) => [...prev, newConvo]);
-      setActiveConversationId(newConvo.id);
+  if (activeModel === "groq") {
+    // ✅ Groq (Pro Dev)
+    const response = await groq.chat.completions.create({
+      model: "mixtral-8x7b-32768",
+      messages: [
+        { role: "system", content: proDevPrompt() },
+        { role: "user", content: newMsg.content },
+      ],
+      temperature: 0.2,
+    });
+    replyText = response.choices[0]?.message?.content?.trim() || "";
+  } else if (activeModel === "openai") {
+    // ✅ OpenAI (with optional Web context)
+    let webText = "";
+    let webSources: { title?: string; link: string; snippet?: string }[] = [];
+
+    if (useWeb || needsFreshData(newMsg.content)) {
+      const r = await fetchFreshFact(newMsg.content);
+      webText = r.text || "";
+      webSources = r.sources || [];
     }
 
-    setInput("");
-    setIsTyping(true);
+    const sourceList =
+      webSources.length > 0
+        ? "\n\nSources:\n" +
+          webSources.map((s, i) => `${i + 1}. ${s.title || s.link} — ${s.link}`).join("\n")
+        : "";
 
-    try {
-      // ✅ Local answer first
-      const local = maybeLocalAnswer(newMsg.content);
-      if (local) {
-        const reply: Message = {
-          role: "assistant",
-          content: local,
-          timestamp: getTime(),
-        };
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === convoId ? { ...c, messages: [...c.messages, reply] } : c
-          )
-        );
-        setIsTyping(false);
-        return;
-      }
+    const messages = [
+      { role: "system" as const, content: systemPrompt(now) },
+      ...(webText
+        ? [{ role: "system" as const, content: `Web context:\n${webText}${sourceList}` }]
+        : []),
+      { role: "user" as const, content: newMsg.content },
+    ];
 
-      let replyText = "";
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages,
+      temperature: 0.2,
+    });
+    replyText = response.choices[0]?.message?.content?.trim() || "";
+  }
 
-      if (activeModel === "groq") {
-        // ✅ Groq (Pro Dev)
-        const response = await groq.chat.completions.create({
-          model: "mixtral-8x7b-32768",
-          messages: [
-            { role: "system", content: proDevPrompt() },
-            { role: "user", content: newMsg.content },
-          ],
-          temperature: 0.2,
-        });
-        replyText = response.choices[0]?.message?.content?.trim() || "";
-      } else if (activeModel === "openai") {
+  // ✅ Add assistant reply
+  if (replyText) {
+    const reply: Message = {
+      role: "assistant",
+      content: replyText,
+      timestamp: getTime(),
+    };
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === convoId ? { ...c, messages: [...c.messages, reply] } : c
+      )
+    );
+  }
 
-        // ✅ OpenAI (with optional Web context)
-        let webText = "";
-        let webSources: { title?: string; link: string; snippet?: string }[] = [];
+  setIsTyping(false);
+};
 
-        if (useWeb || needsFreshData(newMsg.content)) {
-          const r = await fetchFreshFact(newMsg.content);
-          webText = r.text || "";
-          webSources = r.sources || [];
-        }
-
-        const sourceList =
-          webSources.length > 0
-            ? "\n\nSources:\n" +
-              webSources.map((s, i) => `${i + 1}. ${s.title || s.link} — ${s.link}`).join("\n")
-            : "";
-
-        const messages = [
-          { role: "system" as const, content: systemPrompt(now) },
-          ...(webText
-            ? [{ role: "system" as const, content: `Web context:\n${webText}${sourceList}` }]
-            : []),
-          { role: "user" as const, content: newMsg.content },
-        ];
-
-        const response = await client.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages,
-          temperature: 0.2,
-        });
-
-        replyText = response.choices[0]?.message?.content?.trim() || "";
-
-        if (!replyText && webText) replyText = `**From the web:**\n\n${webText}`;
-        if (!replyText) replyText = "⚠️ I couldn't find a reliable answer.";
-
-        if (webSources.length > 0 && !/\*\*Sources:\*\*/i.test(replyText)) {
-          replyText +=
-            "\n\n**Sources:**\n" +
-            webSources.map((s) => `- [${s.title || s.link}](${s.link})`).join("\n");
-        }
-      }
-
-      const reply: Message = {
-        role: "assistant",
-        content: replyText || "⚠️ No response.",
-        timestamp: getTime(),
-      };
-
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === convoId ? { ...c, messages: [...c.messages, reply] } : c
-        )
-      );
-    } catch (err) {
-      console.error("AI error:", err);
-      const errorMsg: Message = {
-        role: "assistant",
-        content: "❌ Error connecting to AI or web. Check your API keys.",
-        timestamp: getTime(),
-      };
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === convoId ? { ...c, messages: [...c.messages, errorMsg] } : c
-        )
-      );
-    } finally {
-      setIsTyping(false);
-    }
-  };
 
   const activeConversation = conversations.find((c) => c.id === activeConversationId);
 
